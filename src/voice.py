@@ -1,204 +1,121 @@
 import os
-import fitz  
 import subprocess
 import pickle
 import unicodedata
-from InquirerPy import inquirer
+import threading
+import shutil
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
-from rich.progress import Progress
-import threading
-import keyboard
-import time
-import shutil
 
-paragraphs_per_page = [None]    # To store the number of paragraphs in each page
-paragraph_coordinates = [None]  # To store the coordinates of the paragraphs
+import fitz # PyMuPDF  
+import keyboard
+from InquirerPy import inquirer
+from rich.progress import Progress
+
+from src.constants import QUESTION_2, OPTIONS_2, QUESTION_3, OPTIONS_3, QUESTION_4
+
+
+paragraphs_per_page = []        # To store the number of paragraphs in each page
+paragraph_coordinates = []      # To store the coordinates of the paragraphs
 interrupt_process = False       # To stop the voice synthesis process
-last_flag = False               # To store the position of last stopped process
+last_flag = 0                   # To store the position of last stopped process
 lan = ""                        # To store the book language   
 model = ""                      # To store the modal path
 book_dir = ""                   # To store active book directory
 
-def start_voice():
-    global model
 
-    language_options = ["English", "Turkish"]
-    # Ask the user to choose the language of the book
-    lan = inquirer.select(
-        message="Choose the language of the book:",
-        choices=language_options
-    ).execute()
-
-    # choose the appropriate language model
-    if lan == language_options[0]:
-        model = ".\\src\\piper\\en_US-hfc_female-medium.onnx" 
-    elif lan == language_options[1]:
-        model = ".\\src\\piper\\tr_TR-dfki-medium.onnx"
-
-    # Set the console encoding to UTF-8 if the language is Turkish
-    if lan == "tr":
-        command = f'cmd /c chcp 65001'
-        subprocess.call(command, shell=True)
-
+def start_voicing():
+    """ Starts the voicing process by making the necessary preparations. """
+    global model, lan
+    
     # Ask the user if they want to continue or start a new process
     process_type = inquirer.select(
-        message="Do you want to start a new process or continue with an existing one?:",
-        choices=["Start Over", "Continue"]
+        message = QUESTION_2,
+        choices = OPTIONS_2
     ).execute()
 
-    if process_type == "Continue":
+    if process_type == OPTIONS_2[0]:
+        # Ask the user to choose the language of the book
+        lan = inquirer.select(
+            message = QUESTION_3,
+            choices = OPTIONS_3
+        ).execute()
+        new_voicing()                   
+
+    elif process_type == OPTIONS_2[1]:
         continue_voicing()
-    elif process_type == "Start Over":
-        new_voicing()
+
+
+def choose_language_model(lan):
+    """ Chooses the appropriate language model based on the provided language. """
+    global model
+
+    if lan == OPTIONS_3[0]:
+        model = ".\\src\\piper\\en_US-hfc_female-medium.onnx" 
+    elif lan == OPTIONS_3[1]:
+        model = ".\\src\\piper\\tr_TR-dfki-medium.onnx"
+        command = f'cmd /c chcp 65001'          # console encoding for Turkish
+        subprocess.call(command, shell=True)
 
 
 def new_voicing():
-    """
-    
-    """
-    global book_dir
+    """ Starts a fresh voicing process. """
+    global book_dir, lan
+    choose_language_model(lan)      # choose the appropriate language model based on the selected language  
+
     # open the pdf file and extract the text and images
     pdf_file, book_dir = open_file()
-    extract_text_and_imgs(pdf_file)
-    voice()
+    extract_data(pdf_file)
 
-
-def voice():
-    """
-
-    """
-    global book_dir, model
-    tot = len(paragraphs_per_page)
-    
-    threading.Thread(target=interrupt_listenner, daemon=True).start()
-
-    with Progress() as progress:
-        task = progress.add_task("[green]Voicing...", total=tot)
-
-        for page_num in range(1, tot):
-
-            if last_flag and page_num < last_flag:
-                continue
-
-            if not paragraphs_per_page[page_num]:
-                continue
-            
-            for para_num in range(1, paragraphs_per_page[page_num]+1):
-                book_dir_ = book_dir.replace("/", "\\")
-                
-                command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{para_num}.txt | .\\src\\piper\\piper.exe -m {model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{para_num}.wav'
-                subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-            if interrupt_process:
-                # save the current page number
-                with open(f"{book_dir}/last_flag.pickle", "wb") as f:
-                    pickle.dump(page_num+1, f)
-                is_ended = True
-                break
-
-            # Update progress
-            progress.update(task, advance=1)
-
-        # save the current page number
-        dir = "src/data/" + book_dir
-        with open(f"{book_dir}/last_flag.pickle", "wb") as f:
-            pickle.dump(len(paragraphs_per_page), f)
+    # start the text to speech process
+    text_to_speech()
 
 
 def continue_voicing():
-    return
-    # Load the number of paragraphs per page from the pickle file
-    with open("data/paragraphs_per_page.pickle", "rb") as f:
+    """
+    Continues the voicing process from where it was left off.
+    It loads the necessary data from the previous process and starts the text to speech process with the loaded data.
+    """
+    global book_dir, paragraphs_per_page, paragraph_coordinates, last_flag, lan    
+
+    # get the list of books in the data directory
+    books = [d for d in os.listdir("src/data") if os.path.isdir(os.path.join("src/data", d))]
+    if not books:
+        print("No books found in the data directory. Please start a new voicing process.")
+        return
+    # Ask the user to select a book to continue voicing
+    book_name = inquirer.select(
+        message = QUESTION_4,
+        choices = books
+    ).execute()   
+    book_dir = f"src/data/{book_name}"  # set the book directory      
+
+    # Load the paragraphs_per_page, paragraph_coordinates, last_flag and language data
+    with open(f'{book_dir}/paragraphs_per_page.pickle', 'rb') as f:
         paragraphs_per_page = pickle.load(f)
-    
-    # Load the paragraph coordinates from the pickle file
-    with open("data/paragraph_coordinates.pickle", "rb") as f:
+
+    with open(f'{book_dir}/paragraph_coordinates.pickle', 'rb') as f:
         paragraph_coordinates = pickle.load(f)
+
+    with open(f'{book_dir}/last_flag.pickle', 'rb') as f:
+        last_flag = pickle.load(f)
     
-    # Load the last page number from the pickle file
-    with open("data/stop_page.pickle", "rb") as f:
-        stop_page = pickle.load(f)
-    
-    # Run the voice synthesis in a new thread with the last page number passed
-    synthesis_thread = threading.Thread(target=voice_senthesis, args=(stop_page,))
-    synthesis_thread.start()
-    
-    # Listen to the user's commands to end the process when needed
-    while synthesis_thread.is_alive():
-        # to reduce the CPU usage
-        time.sleep(0.05)   
+    with open(f'{book_dir}/language.pickle', 'rb') as f:
+        lan = pickle.load(f)
 
-        # listen to the user's commands
-        command = input("")
-        if command.lower() == "end":
-            print("Ending the process. Please wait!")
-            stop_thread = True
-            while not is_ended:
-                pass
-            break
-
-    print("Program has been ended.")
-
-
-def extract_text_and_imgs(pdf_file):
-    global book_dir
-
-    tot_pages = pdf_file.page_count
-
-    with Progress() as progress:
-        task = progress.add_task("[green]Extracting text...", total=tot_pages)
-        
-        for page_num in range(tot_pages):
-            # Get the page
-            page = pdf_file.load_page(page_num)
-            
-            # Get the page text as paragraph blocks
-            paragraphs = page.get_text("blocks")
-            
-            # Save each paragraph to a txt file
-            para_count = 0
-            par_coords = []
-            for para_num, para in enumerate(paragraphs):
-                if para == "":  # skip empty paragraphs
-                    continue
-                para_count += 1
-                par_coords.append(para[0:4])
-                with open(f"{book_dir}/texts/page_{page_num + 1}_para_{para_num + 1}.txt", "w", encoding="utf-8") as txt_file:
-                    text = para[4].replace('\n', ' ')            
-                    text = text.replace('- ', '')            
-                    text = unicodedata.normalize("NFKC", text) if lan == "en" else text
-                    txt_file.write(text) 
-            
-            # store the number of paragraphs in the page
-            if para_count > 0:
-                paragraphs_per_page.append(para_count)  
-                paragraph_coordinates.append(par_coords)
-            else:
-                paragraphs_per_page.append(None)
-                paragraph_coordinates.append(None)
-
-            # Save the page to an image file
-            dpi = 300       # Adjust DPI for higher quality
-            pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72))  # 72 DPI is default, adjust for higher quality
-            img_filename = f"{book_dir}/images/page_{page_num + 1}.png"
-            pix.save(img_filename)
-            
-            # Update progress
-            progress.update(task, advance=1)
-
-        print("All pages have been converted.")
-
-
-def interrupt_listenner():
-    global interrupt_process
-    keyboard.wait('q')
-    interrupt_process = True
+    # start the text to speech process
+    text_to_speech()
 
 
 def open_file():
     """
-
+    Opens a PDF file using a file dialog and prepares the data directory for the new book.
+    The directory structure is created with subdirectories for images, texts, and audios.
+    The name of the data directory is derived from the PDF file name.
+    Uses the PyMuPDF library to handle PDF files and the tkinter library for the file dialog.
+    Returns:
+        pdf_file (fitz.Document): The opened PDF file.
+        dir_path (str): The path to the data directory for the new book.
     """
     Tk().withdraw()
     file_path = askopenfilename(
@@ -207,15 +124,15 @@ def open_file():
     )
     pdf_file = fitz.open(file_path)
 
-    # name of the data directory will be reserved for the new book
+    # Prepare the data directory for the new book
     file_name = file_path.split("/")[-1].strip(".pdf").replace(" ", "_").lower()
     dir_path = f"src/data/{file_name}"
 
-    # Remove the directory if it already exists
+    # If the directory already exists, delete it for a fresh start
     if os.path.exists(dir_path) and os.path.isdir(dir_path):
         shutil.rmtree(dir_path)
 
-    # Create the new data directory
+    # Create the directory structure for the new book
     os.makedirs(f"{dir_path}/images")
     os.makedirs(f"{dir_path}/texts")
     os.makedirs(f"{dir_path}/audios")
@@ -223,16 +140,110 @@ def open_file():
     return pdf_file, dir_path
 
 
-def clean_console():
-    os.system("cls" if os.name == "nt" else "clear")
+def extract_data(pdf_file):
+    """
+    Extracts text and images from the PDF file and saves them in the appropriate directories.
+    The text is saved as paragraph blocks in separate txt files, and the images are saved as PNG files.
+    The number of pages and paragraphs per page are also stored in .pickle files for later use.
+    """
+    global book_dir, lan, paragraphs_per_page, paragraph_coordinates
+
+    with Progress() as progress:
+        task = progress.add_task("[green]Extracting text...", total=pdf_file.page_count)
+        
+        for page_num in range(pdf_file.page_count):
+            
+            page = pdf_file.load_page(page_num)            # Get the page
+            paragraphs = page.get_text("blocks")           # Get the page text as paragraph blocks
+            
+            # Save each paragraph to a txt file
+            par_count = 0
+            par_coords = []
+            for para_num, par in enumerate(paragraphs):
+                if par == "":  # skip empty paragraphs
+                    continue
+                par_count += 1
+                par_coords.append(par[0:4])
+                with open(f"{book_dir}/texts/page_{page_num + 1}_para_{para_num + 1}.txt", "w", encoding="utf-8") as txt_file:
+                    text = par[4].replace('\n', ' ')            
+                    text = text.replace('- ', '')            
+                    text = unicodedata.normalize("NFKC", text) if lan == "en" else text
+                    txt_file.write(text) 
+            
+            # store the number of paragraphs in the page
+            if par_count > 0:
+                paragraphs_per_page.append(par_count)  
+                paragraph_coordinates.append(par_coords)
+            else:
+                paragraphs_per_page.append(None)
+                paragraph_coordinates.append(None)
+
+            # Save the page as an image file
+            dpi = 300/72    # 72 DPI is default, adjust for higher quality
+            pix = page.get_pixmap(matrix=fitz.Matrix(dpi, dpi))  
+            img_filename = f"{book_dir}/images/page_{page_num + 1}.png"
+            pix.save(img_filename)
+            
+            # Update progress
+            progress.update(task, advance=1, description=f"[green]Extracting text from page {page_num + 1}/{pdf_file.page_count}...")
+        
+        # Store the number of paragraphs per page
+        with open(f"{book_dir}/paragraphs_per_page.pickle", "wb") as f:
+            pickle.dump(paragraphs_per_page, f)
+
+        # Store the paragraph coordinates
+        with open(f"{book_dir}/paragraph_coordinates.pickle", "wb") as f:
+            pickle.dump(paragraph_coordinates, f)
+
+        # Store the language og the book
+        with open(f"{book_dir}/language.pickle", "wb") as f:
+            pickle.dump(lan, f)
 
 
-def clean_dir(folder_path):
-    """ Deletes all files in the given folder. Except .gitkeep """
-    for filename in os.listdir(folder_path):
-        if filename[0] == ".":
-            continue
-        file_path = os.path.join(folder_path, filename)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
+def text_to_speech():
+    """
+    Converts the extracted text to speech using the Piper TTS model.
+    The audio files are saved in the audios directory with the same naming convention as the text files.
+    The process can be interrupted by pressing the 'q' key, and the current progress is saved to a pickle file.
+    The last processed page number is saved to resume the process later.
+    """
+    global book_dir, last_flag, interrupt_process, model, paragraphs_per_page
 
+    threading.Thread(target=interrupt_listenner, daemon=True).start()           # start the interrupt listener thread to listen for the 'q' key press
+
+    with Progress() as progress:
+        page_count = len(paragraphs_per_page)
+        task = progress.add_task("[green]Voicing...", total=page_count-1)
+
+        for page_num in range(1, page_count+1):
+            # Update progress
+            progress.update(task, advance=1, description=f'[green]Voicing page {page_num}/{page_count}...')        
+
+            # If the process is resuming from a previous interruption, skip to the last processed page
+            if last_flag and page_num <= last_flag:
+                continue
+            
+            # If there are no paragraphs in the page, skip to the next page
+            if not paragraphs_per_page[page_num-1]:
+                continue
+            
+            # voice each paragraph in the page
+            for para_num in range(1, paragraphs_per_page[page_num-1]+1):
+                book_dir_ = book_dir.replace("/", "\\")     # replace forward slashes with backslashes for Windows compatibility
+                command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{para_num}.txt | .\\src\\piper\\piper.exe -m {model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{para_num}.wav'
+                subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # If the process is interrupted, save the current page number and break the loop
+            if interrupt_process:
+                break
+
+        # save the current page number
+        with open(f"{book_dir}/last_flag.pickle", "wb") as f:
+            pickle.dump(page_num+1, f)
+
+
+def interrupt_listenner():
+    """ Listens for the 'q' key press to interrupt the voicing process. """
+    global interrupt_process
+    keyboard.wait('q')
+    interrupt_process = True
