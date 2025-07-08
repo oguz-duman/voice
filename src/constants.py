@@ -12,6 +12,7 @@ Prompt Tree:
                 ├── QUESTION_4 Select the book:
                     
     ├── OPTIONS_1 Listen to an audio book
+    ├── OPTIONS_1 Exit
 
 """
 

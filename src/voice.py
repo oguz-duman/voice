@@ -109,6 +109,7 @@ def continue_voicing():
         lan = pickle.load(f)
 
     # start the text to speech process
+    choose_language_model(lan)
     text_to_speech()
 
 
@@ -216,24 +217,24 @@ def text_to_speech():
     The last processed page number is saved to resume the process later.
     """
     global book_dir, last_flag, interrupt_process, model, paragraphs_per_page
-
+    interrupted = False
 
     with Progress(transient=True) as progress:
         threading.Thread(target=interrupt_listenner, args=(progress,), daemon=True).start()           # start the interrupt listener thread to listen for the 'q' key press
         page_count = len(paragraphs_per_page)
-        task = progress.add_task("[green]Voicing...", total=page_count)
+        task = progress.add_task("[green]Voicing page 1...", total=page_count)
 
         for page_num in range(1, page_count+1):
             # check if the process is resuming from a previous interruption and if the page has paragraphs to voice
-            if (not last_flag or page_num > last_flag) and paragraphs_per_page[page_num-1]:
+            if (last_flag == 0 or page_num > last_flag) and paragraphs_per_page[page_num-1]:
                 # voice each paragraph in the page
-                for para_num in range(1, paragraphs_per_page[page_num-1]+1):
+                for par_num in range(1, paragraphs_per_page[page_num-1]+1):
                     book_dir_ = book_dir.replace("/", "\\")     # replace forward slashes with backslashes for Windows compatibility
-                    command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{para_num}.txt | .\\src\\piper\\piper.exe -m {model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{para_num}.wav'
+                    command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{par_num}.txt | .\\src\\piper\\piper.exe -m {model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{par_num}.wav'
                     subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             # Update progress
-            progress.update(task, advance=1, description=f'[green]Voicing page {page_num}/{page_count}...')        
+            progress.update(task, advance=1, description=f'[green]Voicing page {page_num+1}/{page_count}...')        
 
             # If the process is interrupted, save the current page number and break the loop
             if interrupt_process:
@@ -241,17 +242,24 @@ def text_to_speech():
                 print("Voicing process interrupted. You can continue later from where you left off.")
                 input("Press Enter to continue...")
                 clear_console()
+                interrupted = True
+                interrupt_process = False
+                subprocess.call("taskkill /IM piper.exe /F", shell=True)
                 break
-
+        
         # save the current page number
         with open(f"{book_dir}/last_flag.pickle", "wb") as f:
-            pickle.dump(page_num+1, f)
+            pickle.dump(page_num, f)
+        last_flag = page_num
+        clear_console()
+        if not interrupted:
+            print("Voicing process is completed.\n") 
 
 
 def interrupt_listenner(progress):
     """ Listens for the 'q' key press to interrupt the voicing process. """
     global interrupt_process
-    print("Press 'q' to stop the voicing process and continue later from where you left off.")
+    print("Press 'q' to stop the voicing process and continue later where you left off.")
     keyboard.wait('q')
     progress.stop()
     clear_console()
