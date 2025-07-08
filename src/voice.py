@@ -33,6 +33,7 @@ def start_voicing():
         message = QUESTION_2,
         choices = OPTIONS_2
     ).execute()
+    clear_console()
 
     if process_type == OPTIONS_2[0]:
         # Ask the user to choose the language of the book
@@ -40,6 +41,7 @@ def start_voicing():
             message = QUESTION_3,
             choices = OPTIONS_3
         ).execute()
+        clear_console()
         new_voicing()                   
 
     elif process_type == OPTIONS_2[1]:
@@ -65,6 +67,8 @@ def new_voicing():
 
     # open the pdf file and extract the text and images
     pdf_file, book_dir = open_file()
+    if not pdf_file:
+        return
     extract_data(pdf_file)
 
     # start the text to speech process
@@ -88,6 +92,7 @@ def continue_voicing():
         message = QUESTION_4,
         choices = books
     ).execute()   
+    clear_console()
     book_dir = f"src/data/{book_name}"  # set the book directory      
 
     # Load the paragraphs_per_page, paragraph_coordinates, last_flag and language data
@@ -122,6 +127,9 @@ def open_file():
         title="Select a PDF file",
         filetypes=[("PDF files", "*.pdf")]
     )
+    if not file_path:
+        print("No PDF file selected. Exiting the voicing process.")
+        return None, None
     pdf_file = fitz.open(file_path)
 
     # Prepare the data directory for the new book
@@ -148,7 +156,7 @@ def extract_data(pdf_file):
     """
     global book_dir, lan, paragraphs_per_page, paragraph_coordinates
 
-    with Progress() as progress:
+    with Progress(transient=True) as progress:
         task = progress.add_task("[green]Extracting text...", total=pdf_file.page_count)
         
         for page_num in range(pdf_file.page_count):
@@ -198,7 +206,7 @@ def extract_data(pdf_file):
         # Store the language og the book
         with open(f"{book_dir}/language.pickle", "wb") as f:
             pickle.dump(lan, f)
-
+        
 
 def text_to_speech():
     """
@@ -209,32 +217,30 @@ def text_to_speech():
     """
     global book_dir, last_flag, interrupt_process, model, paragraphs_per_page
 
-    threading.Thread(target=interrupt_listenner, daemon=True).start()           # start the interrupt listener thread to listen for the 'q' key press
 
-    with Progress() as progress:
+    with Progress(transient=True) as progress:
+        threading.Thread(target=interrupt_listenner, args=(progress,), daemon=True).start()           # start the interrupt listener thread to listen for the 'q' key press
         page_count = len(paragraphs_per_page)
-        task = progress.add_task("[green]Voicing...", total=page_count-1)
+        task = progress.add_task("[green]Voicing...", total=page_count)
 
         for page_num in range(1, page_count+1):
+            # check if the process is resuming from a previous interruption and if the page has paragraphs to voice
+            if (not last_flag or page_num > last_flag) and paragraphs_per_page[page_num-1]:
+                # voice each paragraph in the page
+                for para_num in range(1, paragraphs_per_page[page_num-1]+1):
+                    book_dir_ = book_dir.replace("/", "\\")     # replace forward slashes with backslashes for Windows compatibility
+                    command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{para_num}.txt | .\\src\\piper\\piper.exe -m {model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{para_num}.wav'
+                    subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
             # Update progress
             progress.update(task, advance=1, description=f'[green]Voicing page {page_num}/{page_count}...')        
 
-            # If the process is resuming from a previous interruption, skip to the last processed page
-            if last_flag and page_num <= last_flag:
-                continue
-            
-            # If there are no paragraphs in the page, skip to the next page
-            if not paragraphs_per_page[page_num-1]:
-                continue
-            
-            # voice each paragraph in the page
-            for para_num in range(1, paragraphs_per_page[page_num-1]+1):
-                book_dir_ = book_dir.replace("/", "\\")     # replace forward slashes with backslashes for Windows compatibility
-                command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{para_num}.txt | .\\src\\piper\\piper.exe -m {model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{para_num}.wav'
-                subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
             # If the process is interrupted, save the current page number and break the loop
             if interrupt_process:
+                clear_console()
+                print("Voicing process interrupted. You can continue later from where you left off.")
+                input("Press Enter to continue...")
+                clear_console()
                 break
 
         # save the current page number
@@ -242,8 +248,17 @@ def text_to_speech():
             pickle.dump(page_num+1, f)
 
 
-def interrupt_listenner():
+def interrupt_listenner(progress):
     """ Listens for the 'q' key press to interrupt the voicing process. """
     global interrupt_process
+    print("Press 'q' to stop the voicing process and continue later from where you left off.")
     keyboard.wait('q')
+    progress.stop()
+    clear_console()
+    print("Interrupting the voicing process. Please wait...")
     interrupt_process = True
+
+
+def clear_console():
+    os.system("cls" if os.name == "nt" else "clear")
+
