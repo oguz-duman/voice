@@ -16,7 +16,7 @@ Prompt Tree:
 """
 
 QUESTION_1 = "Choose an option:"
-OPTIONS_1 = ["Voice a book", "Listen to an audio book"]
+OPTIONS_1 = ["Voice a book", "Listen to an audio book", "Exit"]
 
 QUESTION_2 = "Start a new process or continue with an existing one:"
 OPTIONS_2 = ["Start Over", "Continue"]
