@@ -123,7 +123,7 @@ class VoicingApp():
     def text_to_speech(self):
         """
         """
-        interrupted = False
+        interrupted = False     # to check if the process is completed or interrupted
 
         with Progress(transient=True) as progress:
             threading.Thread(target=self.interrupt_listenner, args=(progress,), daemon=True).start()           # start the interrupt listener thread to listen for the 'q' key press
@@ -143,13 +143,10 @@ class VoicingApp():
                 progress.update(task, advance=1, description=f'[green]Voicing page {page_num+1}/{page_count}...')        
 
                 # If the process is interrupted, save the current page number and break the loop
-                if interrupt_process:
-                    clear_console()
-                    print("Voicing process interrupted. You can continue later from where you left off.")
-                    input("Press Enter to continue...")
-                    clear_console()
+                if self.interrupt_process:
+                    self.warning_message("Voicing process interrupted. You can continue later from where you left off.")
                     interrupted = True
-                    interrupt_process = False
+                    self.interrupt_process = False
                     subprocess.call("taskkill /IM piper.exe /F", shell=True)
                     break
             
@@ -157,18 +154,19 @@ class VoicingApp():
             with open(f"{self.data_dir}/last_flag.pickle", "wb") as f:
                 pickle.dump(page_num, f)
             last_flag = page_num
-            clear_console()
+            self.clear_console()
             if not interrupted:
                 print("Voicing process is completed.\n") 
    
+
     def interrupt_listenner(self, progress):
         """ Listens for the 'q' key press to interrupt the voicing process. """
         print("Press 'q' to stop the voicing process and continue later where you left off.")
         keyboard.wait('q')
         progress.stop()
-        clear_console()
+        self.clear_console()
         print("Interrupting the voicing process. Please wait...")
-        interrupt_process = True
+        self.interrupt_process = True
 
 
     def get_book_list(self):
@@ -198,4 +196,16 @@ class VoicingApp():
             self.language = pickle.load(f)
             
         self.choose_language_model()
+
+
+    def clear_console(self):    
+        os.system("cls" if os.name == "nt" else "clear")
+
+
+    def warning_message(self, message):
+        self.clear_console()
+        print(message)
+        input("Press Enter to continue...")
+        self.clear_console()
+
 

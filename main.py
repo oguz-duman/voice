@@ -66,8 +66,8 @@ class MenuNavigator:
             self.state = "exit"
             return
         
-        if voicing_app.open_file():
-            print("No PDF file selected. Exiting the voicing process.")
+        if not voicing_app.open_file():
+            self.warning_message("No PDF file selected. Exiting the voicing process.")
             self.state = "main_menu"
             return
 
@@ -106,6 +106,13 @@ class MenuNavigator:
 
     def clear_console(self):    
         os.system("cls" if os.name == "nt" else "clear")
+
+
+    def warning_message(self, message):
+        self.clear_console()
+        print(message)
+        input("Press Enter to continue...")
+        self.clear_console()
 
 
 # create class objects
