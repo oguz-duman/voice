@@ -25,11 +25,11 @@ class VoicingApp():
         self.pdf_file = None                    # To store the PDF file
         self.data_dir = None                    # To store the active active book data directory
 
-    def choose_language_model(self, language):
+    def choose_language_model(self):
         """ Chooses the appropriate language model based on the provided language. """
-        if language == "English":
+        if self.language == "English":
             self.model = ".\\src\\piper\\en_US-hfc_female-medium.onnx" 
-        elif language == "Turkish":
+        elif self.language == "Turkish":
             self.model = ".\\src\\piper\\tr_TR-dfki-medium.onnx"
             command = f'cmd /c chcp 65001'          # console encoding for Turkish
             subprocess.call(command, shell=True)
@@ -132,11 +132,11 @@ class VoicingApp():
 
             for page_num in range(1, page_count+1):
                 # check if the process is resuming from a previous interruption and if the page has paragraphs to voice
-                if (last_flag == 0 or page_num > last_flag) and self.paragraphs_per_page[page_num-1]:
+                if (self.last_position == 0 or page_num > self.last_position) and self.paragraphs_per_page[page_num-1]:
                     # voice each paragraph in the page
                     for par_num in range(1, self.paragraphs_per_page[page_num-1]+1):
-                        book_dir_ = self.data_dir.replace("/", "\\")     # replace forward slashes with backslashes for Windows compatibility
-                        command = f'cmd /c type .\\{book_dir_}\\texts\\page_{page_num}_para_{par_num}.txt | .\\src\\piper\\piper.exe -m {self.model} -f .\\{book_dir_}\\audios\\page_{page_num}_para_{par_num}.wav'
+                        data_dir = self.data_dir.replace("/", "\\")     # replace forward slashes with backslashes for Windows compatibility
+                        command = f'cmd /c type .\\{data_dir}\\texts\\page_{page_num}_para_{par_num}.txt | .\\src\\piper\\piper.exe -m {self.model} -f .\\{data_dir}\\audios\\page_{page_num}_para_{par_num}.wav'
                         subprocess.call(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
                 # Update progress
@@ -151,17 +151,18 @@ class VoicingApp():
                     break
             
             # save the current page number
-            with open(f"{self.data_dir}/last_flag.pickle", "wb") as f:
+            with open(f"{self.data_dir}/self.last_position.pickle", "wb") as f:
                 pickle.dump(page_num, f)
-            last_flag = page_num
+            self.last_position = page_num
+            progress.stop()
             self.clear_console()
             if not interrupted:
-                print("Voicing process is completed.\n") 
+                self.warning_message("Voicing process is completed.") 
    
 
     def interrupt_listenner(self, progress):
         """ Listens for the 'q' key press to interrupt the voicing process. """
-        print("Press 'q' to stop the voicing process and continue later where you left off.")
+        print("Press 'q' to stop the voicing process and start listening. You can continue voicing later where you left off.")
         keyboard.wait('q')
         progress.stop()
         self.clear_console()
@@ -189,7 +190,7 @@ class VoicingApp():
         with open(f'{self.data_dir}/paragraph_coordinates.pickle', 'rb') as f:
             self.paragraph_coordinates = pickle.load(f)
 
-        with open(f'{self.data_dir}/last_flag.pickle', 'rb') as f:
+        with open(f'{self.data_dir}/self.last_position.pickle', 'rb') as f:
             self.last_position = pickle.load(f)
         
         with open(f'{self.data_dir}/language.pickle', 'rb') as f:
@@ -204,7 +205,7 @@ class VoicingApp():
 
     def warning_message(self, message):
         self.clear_console()
-        print(message)
+        print(message, "\n")
         input("Press Enter to continue...")
         self.clear_console()
 

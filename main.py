@@ -70,9 +70,11 @@ class MenuNavigator:
             self.warning_message("No PDF file selected. Exiting the voicing process.")
             self.state = "main_menu"
             return
+        self.clear_console()
 
         voicing_app.create_data_directories()
-        voicing_app.choose_language_model(choice)
+        voicing_app.language = choice
+        voicing_app.choose_language_model()
         voicing_app.extract_book_data()
         voicing_app.text_to_speech()    
 
@@ -110,7 +112,7 @@ class MenuNavigator:
 
     def warning_message(self, message):
         self.clear_console()
-        print(message)
+        print(message, "\n")
         input("Press Enter to continue...")
         self.clear_console()
 
